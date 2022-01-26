@@ -8,22 +8,38 @@
 // static_assert
 #include <assert.h>
 
+// memcpy
+#include <string.h>
 
-#define dmb(option) __asm__ __volatile__("dmb " #option : : : "memory")
+#ifndef smp_wmb
+#define smp_wmb()
+// #define smp_wmb() __sync_synchronize
+#define smp_wmb() __asm__ __volatile__("" : : : "memory")
+#endif
 
-#define aarch32_smp_mb() dmb(ish)
-#define aarch32_smp_rmb() dmb(ishld)
-#define aarch32_smp_wmb() dmb(ishst)
+#define min(x, y) ((x) < (y))
 
-#undef smp_mb
-#undef smp_rmb
-#undef smp_wmb
+#define __must_check __attribute__((__warn_unused_result__))
 
-#define smp_mb() aarch32_smp_mb()
-#define smp_rmb() aarch32_smp_rmb()
-#define smp_wmb() aarch32_smp_wmb()
+static inline unsigned int __must_check __kfifo_uint_must_check_helper(unsigned int val) {
+    return val;
+}
 
+static inline int __must_check __kfifo_int_must_check_helper(int val) {
+    return val;
+}
 
+#define kfifo_len(fifo)                         \
+    ({                                          \
+        __typeof__((fifo) + 1) __tmpl = (fifo); \
+        __tmpl->kfifo.in - __tmpl->kfifo.out;   \
+    })
+
+#define kfifo_is_full(fifo)                     \
+    ({                                          \
+        __typeof__((fifo) + 1) __tmpq = (fifo); \
+        kfifo_len(__tmpq) > __tmpq->kfifo.mask; \
+    })
 
 #define __same_type(a, b) __builtin_types_compatible_p(__typeof__(a), __typeof__(b))
 
@@ -32,8 +48,6 @@
 #define __must_be_array(a) BUILD_BUG_ON_ZERO(__same_type((a), &(a)[0]))
 
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]) + __must_be_array(arr))
-
-
 
 struct __kfifo {
     unsigned int in;
@@ -151,6 +165,88 @@ unsigned int __kfifo_in_r(struct __kfifo *fifo, const void *buf, unsigned int le
         __ret;                                                                                                                                                         \
     })
 
+#define kfifo_is_empty(fifo)                    \
+    ({                                          \
+        __typeof__((fifo) + 1) __tmpq = (fifo); \
+        __tmpq->kfifo.in == __tmpq->kfifo.out;  \
+    })
+
+#define kfifo_get(fifo, val)                                                                                                                                           \
+    __kfifo_uint_must_check_helper(({                                                                                                                                  \
+        __typeof__((fifo) + 1) __tmp = (fifo);                                                                                                                         \
+        __typeof__(__tmp->ptr) __val = (val);                                                                                                                          \
+        unsigned int __ret;                                                                                                                                            \
+        const size_t __recsize = sizeof(*__tmp->rectype);                                                                                                              \
+        struct __kfifo *__kfifo = &__tmp->kfifo;                                                                                                                       \
+        if (__recsize)                                                                                                                                                 \
+            __ret = __kfifo_out_r(__kfifo, __val, sizeof(*__val), __recsize);                                                                                          \
+        else {                                                                                                                                                         \
+            __ret = !kfifo_is_empty(__tmp);                                                                                                                            \
+            if (__ret) {                                                                                                                                               \
+                *(__typeof__(__tmp->type))__val = (__is_kfifo_ptr(__tmp) ? ((__typeof__(__tmp->type))__kfifo->data) : (__tmp->buf))[__kfifo->out & __tmp->kfifo.mask]; \
+                smp_wmb();                                                                                                                                             \
+                __kfifo->out++;                                                                                                                                        \
+            }                                                                                                                                                          \
+        }                                                                                                                                                              \
+        __ret;                                                                                                                                                         \
+    }))
+
+#define __KFIFO_PEEK(data, out, mask) ((data)[(out) & (mask)])
+
+static unsigned int __kfifo_peek_n(struct __kfifo *fifo, size_t recsize) {
+    unsigned int l;
+    unsigned int mask = fifo->mask;
+    unsigned char *data = fifo->data;
+
+    l = __KFIFO_PEEK(data, fifo->out, mask);
+
+    if (--recsize) l |= __KFIFO_PEEK(data, fifo->out + 1, mask) << 8;
+
+    return l;
+}
+
+static void kfifo_copy_out(struct __kfifo *fifo, void *dst, unsigned int len, unsigned int off) {
+    unsigned int size = fifo->mask + 1;
+    unsigned int esize = fifo->esize;
+    unsigned int l;
+
+    off &= fifo->mask;
+    if (esize != 1) {
+        off *= esize;
+        size *= esize;
+        len *= esize;
+    }
+    l = min(len, size - off);
+
+    memcpy(dst, fifo->data + off, l);
+    memcpy(dst + l, fifo->data, len - l);
+    /*
+     * make sure that the data is copied before
+     * incrementing the fifo->out index counter
+     */
+    smp_wmb();
+}
+
+static unsigned int kfifo_out_copy_r(struct __kfifo *fifo, void *buf, unsigned int len, size_t recsize, unsigned int *n) {
+    *n = __kfifo_peek_n(fifo, recsize);
+
+    if (len > *n) len = *n;
+
+    kfifo_copy_out(fifo, buf, len, fifo->out + recsize);
+    return len;
+}
+
+unsigned int __kfifo_out_r(struct __kfifo *fifo, void *buf, unsigned int len, size_t recsize) {
+    unsigned int n;
+
+    if (fifo->in == fifo->out) return 0;
+
+    len = kfifo_out_copy_r(fifo, buf, len, recsize, &n);
+    fifo->out += n + recsize;
+    return len;
+}
+
+
 
 struct ad7124_channel_config {
     unsigned int cfg_slot;
@@ -165,7 +261,6 @@ struct ad7124_state {
     DECLARE_KFIFO(live_cfgs_fifo, struct ad7124_channel_config *, AD7124_MAX_CONFIGS);
 };
 
-
 int main() {
     struct ad7124_state st_instance;
     struct ad7124_state *st = &st_instance;
@@ -174,8 +269,25 @@ int main() {
     struct ad7124_channel_config cfg_arr[10];
     for (int i = 0; i < 10; ++i) {
         struct ad7124_channel_config *cfg = &cfg_arr[i];
-        kfifo_put(&st->live_cfgs_fifo, cfg);
+        cfg->cfg_slot = i;
+        cfg->filter_type = 1000 + i;
+        unsigned int ret = kfifo_put(&st->live_cfgs_fifo, cfg);
+        printf("%u\n", ret);
     }
+
+    printf("len:%d\n", kfifo_len(&st->live_cfgs_fifo));
+
+    for (int i = 0; i < 10; ++i) {
+        struct ad7124_channel_config *lru_cfg;
+        int ret = kfifo_get(&st->live_cfgs_fifo, &lru_cfg);
+        if (ret != 0) {
+            printf("%d %u %u\n", ret, lru_cfg->cfg_slot, lru_cfg->filter_type);
+        } else {
+            printf("%d \n", ret);
+        }
+    }
+
+    printf("len:%d\n", kfifo_len(&st->live_cfgs_fifo));
 
     return 0;
 }
@@ -185,6 +297,6 @@ gcc -g -Wall -std=c11 kfifo_test.c
 */
 
 /*
-kfifo简单总结：
+kfifo简单总结：代码有一点冗长，可能需要精炼一点，这里只是做个测试，没有分h和c文件，只是最快扒过来。 barrier的代码好像有点问题
     ps:ARRAY_SIZE里面在编译阶段判定一下类型的做法，非常赞
 */
