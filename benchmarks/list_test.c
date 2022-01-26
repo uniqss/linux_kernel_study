@@ -6,6 +6,9 @@
 // offsetof
 #include <stddef.h>
 
+// static_assert
+#include <assert.h>
+
 struct list_head {
     struct list_head *next, *prev;
 };
@@ -127,6 +130,8 @@ int main() {
 
     // 删
     list_del(&c->list);
+    // 注意删除并没有释放内存！
+    c->minor = 12345;
 
     // 打印
     {
@@ -154,3 +159,14 @@ int main() {
 
     return 0;
 }
+
+/*
+gcc -g -Wall -std=c11 list_test.c
+*/
+
+/*
+list简单总结：所有操作不涉及内存操作，c的思路就是让用户去操作这个指针指向的实际地址，包括分配和释放。这一点和c++里面的<list>不一样，c++的思路是封装，把任务交给里面去处理，可以直接存对象的list。
+增删改查还算精练。
+对于单链表的场景，尚有一定的性能提升空间，可以改为单链表(比如时间轮定时器实现里面的定时器节点)
+总体来说不到一百行代码的list实现，不用模板不用c++的那些坑爹的东西，非常精炼了
+*/
