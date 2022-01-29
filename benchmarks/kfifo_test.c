@@ -145,24 +145,25 @@ unsigned int __kfifo_in_r(struct __kfifo *fifo, const void *buf, unsigned int le
     return len;
 }
 
-#define kfifo_put(fifo, val)                                                                                                                                           \
-    ({                                                                                                                                                                 \
-        __typeof__((fifo) + 1) __tmp = (fifo);                                                                                                                         \
-        __typeof__(*__tmp->const_type) __val = (val);                                                                                                                  \
-        unsigned int __ret;                                                                                                                                            \
-        size_t __recsize = sizeof(*__tmp->rectype);                                                                                                                    \
-        struct __kfifo *__kfifo = &__tmp->kfifo;                                                                                                                       \
-        if (__recsize)                                                                                                                                                 \
-            __ret = __kfifo_in_r(__kfifo, &__val, sizeof(__val), __recsize);                                                                                           \
-        else {                                                                                                                                                         \
-            __ret = !kfifo_is_full(__tmp);                                                                                                                             \
-            if (__ret) {                                                                                                                                               \
-                (__is_kfifo_ptr(__tmp) ? ((__typeof__(__tmp->type))__kfifo->data) : (__tmp->buf))[__kfifo->in & __tmp->kfifo.mask] = *(__typeof__(__tmp->type))&__val; \
-                smp_wmb();                                                                                                                                             \
-                __kfifo->in++;                                                                                                                                         \
-            }                                                                                                                                                          \
-        }                                                                                                                                                              \
-        __ret;                                                                                                                                                         \
+#define kfifo_put(fifo, val)                                                                                                         \
+    ({                                                                                                                               \
+        __typeof__((fifo) + 1) __tmp = (fifo);                                                                                       \
+        __typeof__(*__tmp->const_type) __val = (val);                                                                                \
+        unsigned int __ret;                                                                                                          \
+        size_t __recsize = sizeof(*__tmp->rectype);                                                                                  \
+        struct __kfifo *__kfifo = &__tmp->kfifo;                                                                                     \
+        if (__recsize)                                                                                                               \
+            __ret = __kfifo_in_r(__kfifo, &__val, sizeof(__val), __recsize);                                                         \
+        else {                                                                                                                       \
+            __ret = !kfifo_is_full(__tmp);                                                                                           \
+            if (__ret) {                                                                                                             \
+                (__is_kfifo_ptr(__tmp) ? ((__typeof__(__tmp->type))__kfifo->data) : (__tmp->buf))[__kfifo->in & __tmp->kfifo.mask] = \
+                    *(__typeof__(__tmp->type))&__val;                                                                                \
+                smp_wmb();                                                                                                           \
+                __kfifo->in++;                                                                                                       \
+            }                                                                                                                        \
+        }                                                                                                                            \
+        __ret;                                                                                                                       \
     })
 
 #define kfifo_is_empty(fifo)                    \
@@ -171,24 +172,25 @@ unsigned int __kfifo_in_r(struct __kfifo *fifo, const void *buf, unsigned int le
         __tmpq->kfifo.in == __tmpq->kfifo.out;  \
     })
 
-#define kfifo_get(fifo, val)                                                                                                                                           \
-    __kfifo_uint_must_check_helper(({                                                                                                                                  \
-        __typeof__((fifo) + 1) __tmp = (fifo);                                                                                                                         \
-        __typeof__(__tmp->ptr) __val = (val);                                                                                                                          \
-        unsigned int __ret;                                                                                                                                            \
-        const size_t __recsize = sizeof(*__tmp->rectype);                                                                                                              \
-        struct __kfifo *__kfifo = &__tmp->kfifo;                                                                                                                       \
-        if (__recsize)                                                                                                                                                 \
-            __ret = __kfifo_out_r(__kfifo, __val, sizeof(*__val), __recsize);                                                                                          \
-        else {                                                                                                                                                         \
-            __ret = !kfifo_is_empty(__tmp);                                                                                                                            \
-            if (__ret) {                                                                                                                                               \
-                *(__typeof__(__tmp->type))__val = (__is_kfifo_ptr(__tmp) ? ((__typeof__(__tmp->type))__kfifo->data) : (__tmp->buf))[__kfifo->out & __tmp->kfifo.mask]; \
-                smp_wmb();                                                                                                                                             \
-                __kfifo->out++;                                                                                                                                        \
-            }                                                                                                                                                          \
-        }                                                                                                                                                              \
-        __ret;                                                                                                                                                         \
+#define kfifo_get(fifo, val)                                                                                                             \
+    __kfifo_uint_must_check_helper(({                                                                                                    \
+        __typeof__((fifo) + 1) __tmp = (fifo);                                                                                           \
+        __typeof__(__tmp->ptr) __val = (val);                                                                                            \
+        unsigned int __ret;                                                                                                              \
+        const size_t __recsize = sizeof(*__tmp->rectype);                                                                                \
+        struct __kfifo *__kfifo = &__tmp->kfifo;                                                                                         \
+        if (__recsize)                                                                                                                   \
+            __ret = __kfifo_out_r(__kfifo, __val, sizeof(*__val), __recsize);                                                            \
+        else {                                                                                                                           \
+            __ret = !kfifo_is_empty(__tmp);                                                                                              \
+            if (__ret) {                                                                                                                 \
+                *(__typeof__(__tmp->type))__val =                                                                                        \
+                    (__is_kfifo_ptr(__tmp) ? ((__typeof__(__tmp->type))__kfifo->data) : (__tmp->buf))[__kfifo->out & __tmp->kfifo.mask]; \
+                smp_wmb();                                                                                                               \
+                __kfifo->out++;                                                                                                          \
+            }                                                                                                                            \
+        }                                                                                                                                \
+        __ret;                                                                                                                           \
     }))
 
 #define __KFIFO_PEEK(data, out, mask) ((data)[(out) & (mask)])
